@@ -1,0 +1,18 @@
+node_modules/
+reports/
+TestResults/
+allure-results/
+allure-report/
+bin/
+obj/
+.env
+*.user
+*.log
+
+# Unity Windows build output. We do NOT commit the game binaries or Unity's shipped runtime
+# (D3D12, MonoBleedingEdge, *_Data, backup folders, etc.) - both because of Unity's sample
+# license and because it would bloat the repo by ~100 MB. Users build their own instrumented
+# TrashCat.exe following App/README.md and drop it under App/TrashCatWindows/.
+App/TrashCatWindows/**
+!App/TrashCatWindows/
+!App/TrashCatWindows/.gitkeep

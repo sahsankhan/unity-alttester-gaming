@@ -1,0 +1,13 @@
+{
+  "name": "unity-alttester-gaming",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Unity TrashCat POC — AltTester + NUnit, screen recording, Allure reporting.",
+  "scripts": {
+    "preflight": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/preflight.ps1",
+    "test": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests.ps1",
+    "test:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests.ps1 -Filter smoke",
+    "report": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-report.ps1",
+    "report:html": "node scripts/generate-alttester-report.js"
+  }
+}

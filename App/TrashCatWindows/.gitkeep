@@ -1,0 +1,4 @@
+Placeholder so the folder exists in a fresh clone.
+Drop your instrumented TrashCat.exe (and its accompanying _Data folder, Mono runtime, etc.)
+into this directory - see ../README.md for the Unity build steps.
+This folder itself is git-ignored; only this .gitkeep is tracked.

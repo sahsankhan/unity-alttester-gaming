@@ -1,0 +1,122 @@
+name: TrashCat AltTester Tests
+
+# What this workflow does:
+#   1. Restores + builds the NUnit test project
+#   2. Runs the AltTester-driven smoke suite against the running Unity game
+#   3. Generates the Allure HTML report
+#   4. Uploads the Allure report (and the review artifacts: video, contact sheet,
+#      per-run JSONL log, failure screenshots) as downloadable CI artifacts
+#
+# This targets a self-hosted Windows runner because the tests need:
+#   - The instrumented TrashCat.exe already installed on the machine
+#   - AltTester Desktop running with its server on 127.0.0.1:13000
+#   - A real graphics session (Unity player must actually render)
+# See README section "CI" for one-time runner setup.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tests/**"
+      - "scripts/**"
+      - "package.json"
+      - ".github/workflows/tests.yml"
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: 'NUnit category filter (e.g. "smoke"). Leave blank to run every test.'
+        required: false
+        default: ""
+
+concurrency:
+  # Serialize runs on the same runner - only one Unity + AltTester session at a time.
+  group: trashcat-alttester
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: AltTester smoke on self-hosted Windows
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: pwsh
+
+    env:
+      # Path to the instrumented Windows player on the runner. Override with a repo
+      # variable named GAME_EXE if the file lives somewhere else on your machine.
+      GAME_EXE: ${{ vars.GAME_EXE || 'App/TrashCatWindows/TrashCat.exe' }}
+      ALT_DRIVER_HOST: 127.0.0.1
+      ALT_DRIVER_PORT: "13000"
+      RECORD_VIDEO: "1"
+      RECORD_FRAME_MS: "500"
+      # AltTester Desktop + the game are expected to already be running on the runner.
+      # Do not let run-tests.ps1 try to (re)launch the exe from CI.
+      LAUNCH_GAME: "0"
+      TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      # Keep the raw Allure JSONs on the runner's disk so allure generate always finds them.
+      REPORT_ROOT: reports
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show tool versions
+        run: |
+          dotnet --version
+          node --version
+          try { allure --version } catch { Write-Warning "allure CLI not found on PATH" }
+          try { ffmpeg -version | Select-Object -First 1 } catch { Write-Warning "ffmpeg not found on PATH" }
+
+      - name: Restore & build test project
+        run: |
+          dotnet restore tests/TrashCat.Tests/TrashCat.Tests.csproj
+          dotnet build tests/TrashCat.Tests/TrashCat.Tests.csproj --no-restore -c Release
+
+      - name: Preflight (AltTester Desktop + game exe + tooling)
+        run: npm run preflight
+
+      - name: Run tests
+        env:
+          FILTER: ${{ inputs.filter }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FILTER)) {
+            pwsh scripts/run-tests.ps1
+          } else {
+            pwsh scripts/run-tests.ps1 -Filter $env:FILTER
+          }
+
+      - name: Generate Allure HTML report
+        if: always()
+        run: npm run report
+
+      - name: Upload Allure HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/allure-report/**
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload raw Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/allure-results/**
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload run recording, log, screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            reports/videos/**
+            reports/logs/**
+            reports/screenshots/**
+          if-no-files-found: warn
+          retention-days: 14
