@@ -13,7 +13,11 @@ function Import-DotEnv {
     if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
     $pair = $_ -split '=', 2
     if ($pair.Count -eq 2) {
-      Set-Item -Path "Env:$($pair[0].Trim())" -Value $pair[1].Trim()
+      $name = $pair[0].Trim()
+      # Keep values already set by the caller (CI env, repo variables). .env only fills gaps.
+      if ($null -eq [Environment]::GetEnvironmentVariable($name)) {
+        Set-Item -Path "Env:$name" -Value $pair[1].Trim()
+      }
     }
   }
 }
@@ -84,7 +88,17 @@ $gameProc = $null
 $ffmpegProc = $null
 
 try {
-  if (($env:LAUNCH_GAME -eq "1") -and $env:GAME_EXE -and (Test-Path $env:GAME_EXE)) {
+  $gameName = if ($env:GAME_EXE) { [System.IO.Path]::GetFileNameWithoutExtension($env:GAME_EXE) } else { $null }
+  $gameAlreadyRunning = $false
+  if ($gameName) {
+    $gameAlreadyRunning = $null -ne (Get-Process -Name $gameName -ErrorAction SilentlyContinue | Where-Object {
+      try { $_.Path -eq $env:GAME_EXE } catch { $false }
+    } | Select-Object -First 1)
+  }
+
+  if ($gameAlreadyRunning) {
+    Write-Host "Game already running. Not launching another copy, and this script will not close it."
+  } elseif (($env:LAUNCH_GAME -eq "1") -and $env:GAME_EXE -and (Test-Path $env:GAME_EXE)) {
     Write-Host "Launching game: $($env:GAME_EXE)"
     $gameProc = Start-Process -FilePath $env:GAME_EXE -WorkingDirectory (Split-Path $env:GAME_EXE -Parent) -PassThru
     $launchWait = if ($env:GAME_LAUNCH_WAIT_SECS) { [int]$env:GAME_LAUNCH_WAIT_SECS } else { 15 }

@@ -10,7 +10,10 @@ function Import-DotEnv {
     if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
     $pair = $_ -split '=', 2
     if ($pair.Count -eq 2) {
-      Set-Item -Path "Env:$($pair[0].Trim())" -Value $pair[1].Trim()
+      $name = $pair[0].Trim()
+      if ($null -eq [Environment]::GetEnvironmentVariable($name)) {
+        Set-Item -Path "Env:$name" -Value $pair[1].Trim()
+      }
     }
   }
 }

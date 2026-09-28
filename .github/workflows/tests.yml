@@ -1,17 +1,12 @@
 name: TrashCat AltTester Tests
 
-# What this workflow does:
-#   1. Restores + builds the NUnit test project
-#   2. Runs the AltTester-driven smoke suite against the running Unity game
-#   3. Generates the Allure HTML report
-#   4. Uploads the Allure report (and the review artifacts: video, contact sheet,
-#      per-run JSONL log, failure screenshots) as downloadable CI artifacts
-#
-# This targets a self-hosted Windows runner because the tests need:
-#   - The instrumented TrashCat.exe already installed on the machine
-#   - AltTester Desktop running with its server on 127.0.0.1:13000
-#   - A real graphics session (Unity player must actually render)
-# See README section "CI" for one-time runner setup.
+# Two jobs:
+#   compile — every push. Restores and builds the test project on GitHub's
+#             own Windows runners. This does not need the game or a self-hosted PC.
+#   smoke   — only when you click Run workflow. Starts AltTester Desktop,
+#             launches the instrumented game, runs the tests, then closes
+#             what it started. Needs a self-hosted Windows runner that is online.
+# See README section "CI".
 
 on:
   push:
@@ -28,16 +23,45 @@ on:
         required: false
         default: ""
 
-concurrency:
-  # Serialize runs on the same runner - only one Unity + AltTester session at a time.
-  group: trashcat-alttester
-  cancel-in-progress: false
-
 jobs:
-  test:
+  compile:
+    name: Build test project
+    runs-on: windows-latest
+    timeout-minutes: 15
+    concurrency:
+      group: trashcat-compile-${{ github.ref }}
+      cancel-in-progress: true
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore & build test project
+        run: |
+          dotnet restore tests/TrashCat.Tests/TrashCat.Tests.csproj
+          dotnet build tests/TrashCat.Tests/TrashCat.Tests.csproj --no-restore -c Release
+
+  smoke:
     name: AltTester smoke on self-hosted Windows
+    # A push must not sit in "Waiting for a runner". Game tests run only
+    # from the Actions "Run workflow" button, and only after compile succeeds.
+    if: github.event_name == 'workflow_dispatch'
+    needs: compile
     runs-on: [self-hosted, windows]
     timeout-minutes: 30
+    concurrency:
+      # One Unity + AltTester session at a time on the lab machine.
+      group: trashcat-alttester
+      cancel-in-progress: false
 
     defaults:
       run:
@@ -51,9 +75,10 @@ jobs:
       ALT_DRIVER_PORT: "13000"
       RECORD_VIDEO: "1"
       RECORD_FRAME_MS: "500"
-      # AltTester Desktop + the game are expected to already be running on the runner.
-      # Do not let run-tests.ps1 try to (re)launch the exe from CI.
-      LAUNCH_GAME: "0"
+      # The smoke job starts AltTester, then run-tests.ps1 launches the game.
+      LAUNCH_GAME: "1"
+      ALTTESTER_DESKTOP_EXE: ${{ vars.ALTTESTER_DESKTOP_EXE }}
+      ALTTESTER_LICENSE: ${{ secrets.ALTTESTER_LICENSE }}
       TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       # Keep the raw Allure JSONs on the runner's disk so allure generate always finds them.
       REPORT_ROOT: reports
@@ -74,10 +99,14 @@ jobs:
           dotnet restore tests/TrashCat.Tests/TrashCat.Tests.csproj
           dotnet build tests/TrashCat.Tests/TrashCat.Tests.csproj --no-restore -c Release
 
-      - name: Preflight (AltTester Desktop + game exe + tooling)
+      - name: Start AltTester server
+        run: pwsh scripts/alttester-server.ps1 -Action Start
+
+      - name: Preflight (game exe + tooling)
         run: npm run preflight
 
       - name: Run tests
+        timeout-minutes: 20
         env:
           FILTER: ${{ inputs.filter }}
         run: |
@@ -86,6 +115,10 @@ jobs:
           } else {
             pwsh scripts/run-tests.ps1 -Filter $env:FILTER
           }
+
+      - name: Stop AltTester server
+        if: always()
+        run: pwsh scripts/alttester-server.ps1 -Action Stop
 
       - name: Generate Allure HTML report
         if: always()

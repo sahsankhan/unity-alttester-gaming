@@ -114,7 +114,16 @@ unity-alttester-gaming/
 
 GitHub Actions workflow at [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
 
-Runs on every push to `main` (test-related paths only) and via manual **Run workflow** trigger with an optional NUnit category filter. It restores + builds the test project, runs the smoke suite, generates the Allure HTML report, and uploads three artifacts per run:
+| When | What runs | Where |
+|------|-----------|--------|
+| Push to `main` (test-related paths) | Restore and build the test project | GitHub-hosted `windows-latest` |
+| **Actions → Run workflow** | That same build, then the AltTester smoke suite | Build on GitHub, smoke on your Windows runner |
+
+A normal push does not wait for your PC. The game job runs only when you start it by hand, and only after the build job is green.
+
+The smoke job starts AltTester Desktop in batch mode, launches the instrumented game, runs the tests, then closes the game and the server **it** started. If something is already listening on `127.0.0.1:13000`, that process is left alone. An optional NUnit category filter is on the Run workflow form.
+
+Artifacts from the smoke job:
 
 | Artifact | Contents |
 |----------|----------|
@@ -122,25 +131,16 @@ Runs on every push to `main` (test-related paths only) and via manual **Run work
 | `allure-results-<runId>` | Raw Allure JSONs (feed to `allure generate` locally or into an allure-history job later) |
 | `run-artifacts-<runId>` | `reports/videos/**` (mp4 + contact-sheet PNG), `reports/logs/**` (per-run JSONL event log), `reports/screenshots/**` (failure PNGs) |
 
-### Why a self-hosted Windows runner
-
-The tests **launch the instrumented Unity Windows player** and talk to it through AltTester Desktop. That needs:
-
-- Windows with a real interactive desktop session (Unity must actually render)
-- The instrumented `TrashCat.exe` present on the machine
-- **AltTester Desktop already open** with the WebSocket server on `127.0.0.1:13000`
-- **The game process already running** and connected to AltTester Desktop
-
-GitHub-hosted runners don't offer a persistent Unity+AltTester environment, so a **self-hosted Windows runner** is the practical choice for this kind of Unity automation.
-
 ### One-time runner setup
 
-On the Windows box that will host the runner:
+The smoke job needs one Windows PC that stays online, with a real desktop session so the game can draw. GitHub's cloud machines cannot do that.
 
 1. Install .NET 8 SDK, Node.js 18+, ffmpeg, and the Allure CLI (`scoop install allure` or `choco install allure-commandline`).
-2. Place the instrumented `TrashCat.exe` under `App/TrashCatWindows/` **or** create a GitHub repository variable named `GAME_EXE` with the absolute path.
-3. Install the GitHub Actions runner on the machine and register it with labels `self-hosted` **and** `windows`. Configure it as a service so it survives reboots.
-4. Before every run: open AltTester Desktop and start the game so it connects. The workflow deliberately does **not** try to relaunch the exe (`LAUNCH_GAME=0`) — you keep manual control of the Unity session.
+2. Install [AltTester Desktop](https://alttester.com/alttester/). The workflow looks for `C:\Program Files\AltTesterDesktop\AltTesterDesktop.exe`. If yours is somewhere else, add a repository variable named `ALTTESTER_DESKTOP_EXE` with the full path.
+3. If batch mode asks for a license, add a repository secret named `ALTTESTER_LICENSE`.
+4. Place the instrumented `TrashCat.exe` under `App/TrashCatWindows/` **or** create a repository variable named `GAME_EXE` with the absolute path.
+5. Repo → **Settings** → **Actions** → **Runners** → **New self-hosted runner**. Register it with labels `self-hosted` and `windows`, then leave the runner program running in the **logged-in desktop**. A runner that exists only as a Windows service cannot show the game window.
+6. **Actions → Run workflow** when you want the smoke tests. If that runner program is not running, this job will sit on "Waiting for a runner" again.
 
 ### Reporting
 
